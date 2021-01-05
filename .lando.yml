@@ -1,0 +1,65 @@
+name: kens-calendar
+recipe: drupal9
+config:
+  webroot: ./web
+  php: '7.4'
+  conf:
+    php: config/php.ini
+
+services:
+  appserver:
+    build:
+      # Save a hash of our lando config for future integrity checking
+      - sha1sum /app/.lando.yml > ~/.lando.yml.sha1
+      - echo && tput setaf 2 && echo "Preparing Drupal..." && tput sgr 0
+      - "COMPOSER_PROCESS_TIMEOUT=600 composer install"
+      - /bin/sh -c "mkdir -p ~/.drush/site-aliases/"
+      - /bin/sh -c "ln -sf /app/drush/sites/kens-calendar.aliases.drushrc.php ~/.drush/site-aliases/kens-calendar.aliases.drushrc.php"
+    run:
+      - "cd $LANDO_MOUNT && composer install"
+    overrides:
+      environment:
+        DRUSH_OPTIONS_URI: "https://kens-calendar.lndo.site"
+
+  mailhog:
+    type: mailhog
+    hogfrom:
+      - appserver
+
+events:
+  post-db-import:
+    - appserver: drush cr
+
+tooling:
+  nukedeps:
+    description: Deletes all node and composer dependency directories.
+    service: appserver
+    user: root
+    cmd:
+      - rm -rf /app/vendor
+      - echo && echo Dependency directories have been deleted. Use $(tput setaf 3)lando install$(tput sgr 0) to to reinstall them.
+
+  lock-update:
+    service: appserver
+    description: Reset and update the composer.lock file to quickly resolve merge conflicts.
+    cmd:
+      - git diff --check --exit-code -- /app/composer.json || { echo "Fix merge conflicts in composer.json before executing this command." && exit 1; }
+      - git checkout HEAD -- /app/composer.lock
+      - cd /app && composer update --lock
+      - git add /app/composer.lock
+
+  xdebug-on:
+    service: appserver
+    description: Enable Xdebug.
+    user: root
+    cmd:
+      - docker-php-ext-enable xdebug && pkill -o -USR2 php-fpm || /etc/init.d/apache2 reload
+      - tput setaf 2 && echo "Xdebug On" && tput sgr 0 && echo
+
+  xdebug-off:
+    service: appserver
+    description: Disable Xdebug.
+    user: root
+    cmd:
+      - rm /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini && pkill -o -USR2 php-fpm || /etc/init.d/apache2 reload
+      - tput setaf 1 && echo "Xdebug Off" && tput sgr 0 && echo
